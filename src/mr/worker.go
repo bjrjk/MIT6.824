@@ -55,18 +55,24 @@ func Worker(mapf func(string, string) []KeyValue,
 	}
 
 	for {
+		log.Println("Getting task from master...")
 		status, task, ok := CallGetTask()
 		if !ok {
+			log.Printf("Failed to call GetTask. Retry in %f seconds.", WaitDuration.Seconds())
 			time.Sleep(WaitDuration)
 			continue
 		}
 		if status == JobStatusFreeTasks {
+			log.Println("Got a free task to run.")
 			runTask(task, env)
 		} else if status == JobStatusWait {
+			log.Println("Master tell me to wait.")
 			time.Sleep(WaitDuration)
 		} else if status == JobStatusNoTasks {
+			log.Println("No more tasks to run.")
 			break
 		} else {
+			log.Printf("Unrecognized status code: %d. Retry in %f seconds.", status, WaitDuration.Seconds())
 			time.Sleep(WaitDuration)
 		}
 	}
@@ -79,7 +85,7 @@ func runTask(task Task, env environ) {
 
 	switch task.Kind {
 	case TaskKindMap:
-		log.Printf("")
+		log.Printf("Map task received. File name is \"%s\".", task.GetMapFilename())
 		keys := make([]string, 0)
 		values := make([]string, 0)
 		for _, kv := range env.mapf(task.GetMapFilename(), task.GetMapInput()) {
@@ -91,6 +97,7 @@ func runTask(task Task, env environ) {
 
 	case TaskKindReduce:
 		keys, values := task.GetReduceInput()
+		log.Printf("Reduce task received. Number of keys is %d.", len(keys))
 		resValues := make([]string, 0, len(values))
 		for i := range keys {
 			k, v := keys[i], values[i]
@@ -104,6 +111,8 @@ func runTask(task Task, env environ) {
 		log.Printf("Unrecognized task kind: %d", task.Kind)
 		return
 	}
+
+	log.Println("Task finished. Submitting task result to master...")
 
 	// Upload task result to the master node.
 	CallSubmitTaskResult(workerId, res)
@@ -123,7 +132,8 @@ func CallSubmitTaskResult(workerId int, result TaskResult) bool {
 		WorkerId: workerId,
 		Result:   result,
 	}
-	if !call("Master.SubmitTask", &args, nil) {
+	reply := SubmitTaskResultReply{}
+	if !call("Master.SubmitTask", &args, &reply) {
 		log.Printf("Failed to call \"Master.SubmitTask\".")
 		return false
 	}
