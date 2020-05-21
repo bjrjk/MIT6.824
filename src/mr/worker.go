@@ -97,7 +97,7 @@ func runTask(task Task, env environ) {
 
 	case TaskKindReduce:
 		keys, values := task.GetReduceInput()
-		log.Printf("Reduce task received. Number of keys is %d.", len(keys))
+		log.Printf("Reduce task received. Number of Keys is %d.", len(keys))
 		resValues := make([]string, 0, len(values))
 		for i := range keys {
 			k, v := keys[i], values[i]

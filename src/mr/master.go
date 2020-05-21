@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"log"
+	"math"
 	"net"
 	"net/http"
 	"net/rpc"
@@ -25,7 +26,6 @@ type taskDistribution struct {
 type Master struct {
 	// Your definitions here.
 	nextTaskId            int
-	inputs                []string
 	mapTasksTodo          []Task
 	reduceTasksTodo       []Task
 	mapTasks              uint
@@ -55,12 +55,12 @@ func popString(str []string) (rest []string, last string) {
 	return
 }
 
-func (m *Master) loadTaskFromNextInput() Task {
-	if len(m.inputs) == 0 {
-		panic("No more input files.")
-	}
-	var file string
-	m.inputs, file = popString(m.inputs)
+func (m *Master) init() {
+	m.intermediateKeyValues = make(map[string][]string)
+	m.distributed = make(map[int]*list.List)
+}
+
+func (m *Master) loadTaskFromInput(file string) {
 	rawContent, err := ioutil.ReadFile(file)
 	if err != nil {
 		// Panic for labs. In real life, error handling mechanisms should kick in and handle this.
@@ -74,7 +74,8 @@ func (m *Master) loadTaskFromNextInput() Task {
 	m.nextTaskId++
 	task.SetMapFilename(file)
 	task.SetMapInput(content)
-	return task
+	m.mapTasksTodo = append(m.mapTasksTodo, task)
+	m.mapTasks++
 }
 
 func (m *Master) lockAndRun(fn func() error) error {
@@ -116,7 +117,7 @@ func (m *Master) fixExpired() {
 }
 
 func (m *Master) hasMoreTasks() bool {
-	return len(m.inputs) == 0 && m.mapTasks == 0 && m.reduceTasks == 0
+	return m.mapTasks != 0 || m.reduceTasks != 0
 }
 
 func (m *Master) distributeTask(workerId int, task Task) {
@@ -151,15 +152,6 @@ func (m *Master) FetchTask(workerId int, reply *GetTaskReply) error {
 			return nil
 		}
 
-		if len(m.inputs) != 0 {
-			// Create a new map task from next input file.
-			reply.Task = m.loadTaskFromNextInput()
-			m.mapTasks++
-			m.distributeTask(workerId, reply.Task)
-			reply.Status = JobStatusFreeTasks
-			return nil
-		}
-
 		// No map task available.
 		// If there are map tasks that do not finish yet, tell the worker to wait for them to finish.
 		if m.mapTasks != 0 {
@@ -184,7 +176,7 @@ func (m *Master) FetchTask(workerId int, reply *GetTaskReply) error {
 
 func (m *Master) submitMapResult(keys []string, values []string) {
 	if len(keys) != len(values) {
-		panic("Length of keys does not equal to length of values.")
+		panic("Length of Keys does not equal to length of Values.")
 	}
 	for i := 0; i < len(keys); i++ {
 		k, v := keys[i], values[i]
@@ -209,7 +201,7 @@ func (m *Master) buildReduceTasks() {
 		tasksCount = uint(len(keys))
 	}
 
-	for i := uint(0); i < tasksCount; i++ {
+	for tasksCount > 0 {
 		keysCount := uint(len(keys)) / tasksCount
 		task := Task{
 			Id:   m.nextTaskId,
@@ -217,15 +209,17 @@ func (m *Master) buildReduceTasks() {
 		}
 		m.nextTaskId++
 		task.SetReduceInput(keys[:keysCount], values[:keysCount])
+		m.reduceTasksTodo = append(m.reduceTasksTodo, task)
+		m.reduceTasks++
 		keys = keys[keysCount:]
 		values = values[keysCount:]
-		tasksCount -= keysCount
+		tasksCount--
 	}
 }
 
 func (m *Master) submitReduceResult(keys []string, values []string) {
 	if len(keys) != len(values) {
-		panic("Length of keys does not equal to length of values.")
+		panic("Length of Keys does not equal to length of Values.")
 	}
 	file := fmt.Sprintf("mr-out-%d", m.reduceTasks)
 	fp, err := os.Create(file)
@@ -234,11 +228,11 @@ func (m *Master) submitReduceResult(keys []string, values []string) {
 	}
 	for i := range keys {
 		k, v := keys[i], values[i]
-		_, _ = fmt.Fprintf(fp, "%s %s", k, v)
+		_, _ = fmt.Fprintf(fp, "%s %s\n", k, v)
 	}
 }
 
-func (m *Master) SubmitTask(result *SubmitTaskResultArgs, _ interface{}) error {
+func (m *Master) SubmitTask(result *SubmitTaskResultArgs, _ *SubmitTaskResultReply) error {
 	log.Printf("SubmitTask called from worker #%d", result.WorkerId)
 	return m.lockAndRun(func() error {
 		var lst *list.List
@@ -326,9 +320,15 @@ func MakeMaster(files []string, nReduce int) *Master {
 	m := Master{}
 
 	// Your code here.
+	m.init()
 	m.maxReduceTasks = uint(nReduce)
 	if m.maxReduceTasks == 0 {
-		m.maxReduceTasks = (1 << 32) - 1
+		m.maxReduceTasks = math.MaxUint32
+	}
+
+	for _, file := range files {
+		log.Printf("Loading map task from input file \"%s\"...", file)
+		m.loadTaskFromInput(file)
 	}
 
 	m.server()
