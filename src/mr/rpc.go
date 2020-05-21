@@ -31,45 +31,45 @@ const (
 type Task struct {
 	Id       int
 	Kind     int
-	filename string
-	keys     []string
-	values   [][]string
+	Filename string
+	Keys     []string
+	Values   [][]string
 }
 
 func (t *Task) GetMapInput() string {
 	if t.Kind != TaskKindMap {
 		panic("Task is not a map task.")
 	}
-	return t.keys[0]
+	return t.Keys[0]
 }
 
 func (t *Task) GetMapFilename() string {
 	if t.Kind != TaskKindMap {
 		panic("Task is not a map task.")
 	}
-	return t.filename
+	return t.Filename
 }
 
 func (t *Task) SetMapFilename(filename string) {
-	t.filename = filename
+	t.Filename = filename
 }
 
 func (t *Task) SetMapInput(value string) {
 	t.Kind = TaskKindMap
-	t.keys[0] = value
+	t.Keys = []string{value}
 }
 
 func (t *Task) GetReduceInput() ([]string, [][]string) {
 	if t.Kind != TaskKindReduce {
 		panic("Task is not a reduce task.")
 	}
-	return t.keys, t.values
+	return t.Keys, t.Values
 }
 
 func (t *Task) SetReduceInput(keys []string, values [][]string) {
 	t.Kind = TaskKindReduce
-	t.keys = keys
-	t.values = values
+	t.Keys = keys
+	t.Values = values
 }
 
 type GetTaskReply struct {
@@ -92,6 +92,9 @@ const (
 type SubmitTaskResultArgs struct {
 	WorkerId int
 	Result   TaskResult
+}
+
+type SubmitTaskResultReply struct {
 }
 
 // Cook up a unique-ish UNIX-domain socket name
