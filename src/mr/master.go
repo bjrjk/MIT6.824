@@ -56,6 +56,7 @@ func popString(str []string) (rest []string, last string) {
 }
 
 func (m *Master) init() {
+	m.nextTaskId = 1
 	m.intermediateKeyValues = make(map[string][]string)
 	m.distributed = make(map[int]*list.List)
 }
@@ -201,6 +202,7 @@ func (m *Master) buildReduceTasks() {
 		tasksCount = uint(len(keys))
 	}
 
+	m.nextTaskId = 1
 	for tasksCount > 0 {
 		keysCount := uint(len(keys)) / tasksCount
 		task := Task{
@@ -214,21 +216,6 @@ func (m *Master) buildReduceTasks() {
 		keys = keys[keysCount:]
 		values = values[keysCount:]
 		tasksCount--
-	}
-}
-
-func (m *Master) submitReduceResult(keys []string, values []string) {
-	if len(keys) != len(values) {
-		panic("Length of Keys does not equal to length of Values.")
-	}
-	file := fmt.Sprintf("mr-out-%d", m.reduceTasks)
-	fp, err := os.Create(file)
-	if err != nil {
-		panic(fmt.Sprintf("Failed to create output file \"%s\": %v", file, err))
-	}
-	for i := range keys {
-		k, v := keys[i], values[i]
-		_, _ = fmt.Fprintf(fp, "%s %s\n", k, v)
 	}
 }
 
@@ -257,12 +244,17 @@ func (m *Master) SubmitTask(result *SubmitTaskResultArgs, _ *SubmitTaskResultRep
 				}
 				break
 			case TaskKindReduce:
-				m.submitReduceResult(keys, values)
 				m.reduceTasks--
 				break
 			default:
 				panic(fmt.Sprintf("Unknown task kind: %d", d.task.Kind))
 			}
+
+			lst.Remove(el)
+			if lst.Len() == 0 {
+				delete(m.distributed, result.WorkerId)
+			}
+
 			break
 		}
 		return nil

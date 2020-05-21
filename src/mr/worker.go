@@ -56,7 +56,7 @@ func Worker(mapf func(string, string) []KeyValue,
 
 	for {
 		log.Println("Getting task from master...")
-		status, task, ok := CallGetTask()
+		status, task, ok := callGetTask()
 		if !ok {
 			log.Printf("Failed to call GetTask. Retry in %f seconds.", WaitDuration.Seconds())
 			time.Sleep(WaitDuration)
@@ -104,6 +104,11 @@ func runTask(task Task, env environ) {
 			resValues = append(resValues, env.reducef(k, v))
 		}
 		res.Keys, res.Values = keys, resValues
+		saveReduceTaskResult(&res)
+		// It's wasteful to transport the result of the reduce work to the master.
+		// So clear them.
+		res.Keys = nil
+		res.Values = nil
 		break
 
 	default:
@@ -115,10 +120,26 @@ func runTask(task Task, env environ) {
 	log.Println("Task finished. Submitting task result to master...")
 
 	// Upload task result to the master node.
-	CallSubmitTaskResult(workerId, res)
+	callSubmitTaskResult(workerId, res)
 }
 
-func CallGetTask() (int, Task, bool) {
+func saveReduceTaskResult(result *TaskResult) {
+	keys, values := result.Keys, result.Values
+	if len(keys) != len(values) {
+		panic("Length of Keys does not equal to length of Values.")
+	}
+	file := fmt.Sprintf("mr-out-%d", result.TaskId)
+	fp, err := os.Create(file)
+	if err != nil {
+		panic(fmt.Sprintf("Failed to create output file \"%s\": %v", file, err))
+	}
+	for i := range keys {
+		k, v := keys[i], values[i]
+		_, _ = fmt.Fprintf(fp, "%s %s\n", k, v)
+	}
+}
+
+func callGetTask() (int, Task, bool) {
 	var reply GetTaskReply
 	if !call("Master.FetchTask", workerId, &reply) {
 		log.Printf("Failed to call \"Master.FetchTask\".")
@@ -127,7 +148,7 @@ func CallGetTask() (int, Task, bool) {
 	return reply.Status, reply.Task, true
 }
 
-func CallSubmitTaskResult(workerId int, result TaskResult) bool {
+func callSubmitTaskResult(workerId int, result TaskResult) bool {
 	args := SubmitTaskResultArgs{
 		WorkerId: workerId,
 		Result:   result,
